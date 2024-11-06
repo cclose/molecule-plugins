@@ -1,0 +1,78 @@
+---
+- name: Destroy
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  no_log: "{{ molecule_no_log | default(false) }}"
+  vars:
+    ansible_python_interpreter: /Users/CoryClose/PythonVEnvs/molecule-plugins/.venv/bin/python3
+    # TODO Make this exist
+    ssh_identity_file: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssh_key"
+    kubeconfig_path: "./harvester.yaml"
+    instances:
+      - name: example-vm
+        namespace: harvester-public
+        rootFsName: root-fs
+        osImageStorageClass: longhorn-image-pqsf2
+        rootFsSize: 10Gi
+        rootFsStorage: osImageStorageClass
+        disks:
+          - name: data
+            size: 15Gi
+            fileSystem:
+              mount: true
+              type: xfs
+              path: /mnt/data
+        sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDkCFce63lUowoayv8qvt6aHY26igytm1FdzMy8mbkP2 CoryClose@cclose-sei-mbp.local"
+
+  tasks:
+
+    - name: Destroy Instance
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: v1
+        kind: VirtualMachine
+        namespace: "{{ instance.namespace | default(defaultNamespace) }}"
+        state: absent
+        definition:
+          metadata:
+            name: "{{ instance.name }}"
+      loop: "{{ instances }}"
+      loop_control:
+        index_var: instance_index
+        loop_var: instance
+
+    # For an explanation of this Loop structure, see Create Secondary Drive(s) task
+    # in Create.yml playbook
+
+    - name: Destroy Secondary Drive(s)
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: v1
+        kind: PersistentVolumeClaim
+        namespace: "{{ instance.namespace | default(defaultNamespace) }}"
+        state: absent
+        definition:
+          metadata:
+            name: "{{ instance.name }}-{{ disk.name }}-pvc"
+      loop: "{{ instances | subelements('disks', skip_missing=True) }}"
+      loop_control:
+        loop_var: instance_and_disk
+      vars:
+        instance: "{{ instance_and_disk[0] }}"  # The main item
+        disk: "{{ instance_and_disk[1] }}"      # The subelement
+
+    - name: Destroy OS Drive
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: v1
+        kind: PersistentVolumeClaim
+        namespace: "{{ instance.namespace }}"
+        state: absent
+        definition:
+          metadata:
+            name: "{{ instance.name }}-{{ instance.rootFsName }}-pvc"
+      loop: "{{ instances }}"
+      loop_control:
+        index_var: instance_index
+        loop_var: instance

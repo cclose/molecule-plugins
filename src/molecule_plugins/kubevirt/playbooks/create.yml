@@ -1,0 +1,338 @@
+---
+- name: Create
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  #no_log: "{{ molecule_no_log }}"
+  vars:
+    ansible_python_interpreter: /Users/CoryClose/PythonVEnvs/molecule-plugins/.venv/bin/python3
+    # TODO Make this exist
+    ssh_identity_file: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssh_key"
+    kubeconfig_path: "./harvester.yaml"
+    # Defaults
+    defaultArch: "amd64"
+    defaultCloudInitType: "cloudInitNoCloud"
+    defaultCores: "2"
+    defaultDiskAccessMode: 'ReadWriteMany'
+    defaultDiskSize: "10Gi"
+    defaultDiskType: "virtio"
+    defaultDiskVolumeMode: "Block"
+    defaultInterfaceType: "virtio"
+    defaultInterfaceName: "enp1s0"
+    defaultMachineType: "q35"
+    defaultMemory: "2Gi"
+    defaultNamespace: "default"
+    # maths
+    defaultCpuRatio: 0.5
+    defaultMemoryRatio: 0.5
+    # Molecule Vars
+    molecule_app_label: "molecule-scenario-instance" # TODO
+    sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDkCFce63lUowoayv8qvt6aHY26igytm1FdzMy8mbkP2 CoryClose@cclose-sei-mbp.local"
+    instances: "{{ molecule_yml.platforms }}"
+    #  - name: example-vm
+    #    namespace: harvester-public
+    #    interfaceMultus: hp-untagged
+    #    rootFsName: root-fs
+    #    rootFsSize: 10Gi
+    #    rootFsStorage: osImageStorageClass
+    #    osImageStorageClass: longhorn-image-pqsf2
+    #    disks:
+    #      - name: data
+    #        size: 15Gi
+    #        fileSystem:
+    #          mount: true
+    #          type: xfs
+    #          path: /mnt/data
+    #    cloudInit:
+    #      userData: |
+    #        #cloud-config
+    #        password: molecule
+    #        chpasswd: { expire: False }
+    #        ssh_pwauth: True
+    #        package_update: true
+    #        package_upgrade: true
+    #
+    #        chpasswd:
+    #          list: |
+    #            ubuntu:ubuntu
+    #          expire: false
+    #
+    #        packages:
+    #          - curl
+    #          - git
+    #          - openssl
+    #          - python3
+    #          - python3-apt
+    #          - qemu-guest-agent
+    #          - wget
+    #        runcmd:
+    #          - - systemctl
+    #            - enable
+    #            - --now
+    #            - qemu-guest-agent.service
+    #        ssh_authorized_keys:
+    #          - {{ sshPublicKey }}
+
+    #      networkData: |
+    #        network:
+    #          version: 2
+    #          ethernets:
+    #            enp1s0:
+    #              dhcp4: true
+    #              gateway4: 10.1.250.1
+    #              nameservers:
+    #                addresses:
+    #                  - 10.1.250.222
+    #                  - 10.1.20.20
+    #                  - 8.8.8.8
+    #                  - 8.8.4.4
+  tasks:
+
+    # Add safe_name to each instance for dynamic facts
+    - name: Add safe_name to each instance
+      set_fact:
+        instances: "{{ instances | map('combine', [{'_safe_name': (item.name | replace('-', '_') | lower)}]) | list }}"
+      loop: "{{ instances }}"
+      loop_control:
+        loop_var: item
+      tags:
+        - data
+
+    - name: Preprocess data for each Instance
+      set_fact:
+        "_{{ instance._safe_name }}_disks": >-
+          [
+            {
+              "disk": { 
+                "bus": "{{ instance.rootFsType | default(defaultDiskType) }}"
+              },
+              "name": "{{ instance.rootFsName }}"
+            },
+            {%- for disk in instance.disks | default([]) %}
+            {
+              "disk": {
+                "bus": "{{ disk.type | default(defaultDiskType) }}"
+              },
+              "name": "{{ disk.name }}"
+            }{% if not loop.last %},{% endif %}
+            {%- endfor %}
+          ]
+        "_{{ instance._safe_name }}_volumes": >-
+          [
+            {
+              "persistentVolumeClaim": { 
+                "claimName": "{{ instance.name }}-{{ instance.rootFsName }}-pvc"
+              },
+              "name": "{{ instance.rootFsName }}"
+            },
+            {%- for disk in instance.disks | default([]) %}
+            {
+              "persistentVolumeClaim": {
+                "claimName": "{{ instance.name }}-{{ disk.name }}-pvc"
+              },
+              "name": "{{ disk.name }}"
+            }{% if not loop.last or instance.cloudInit is defined %},{% endif %}
+            {%- endfor %}
+            {%- if instance.cloudInit is defined %}
+            {
+              "name": "cloudinitdisk",
+              "{{ instance.cloudInit.type | default(defaultCloudInitType) }}": {
+                "userDataBase64": "{{ instance.cloudInit.userData | b64encode }}",
+                "networkDataBase64": "{{ instance.cloudInit.networkData | b64encode }}"
+              }
+            }
+            {%- endif %}
+          ]
+        "_{{ instance._safe_name }}_interfaces": >-
+          [
+            {
+              "bridge": {},
+              "model": "{{ instance.interfaceType | default(defaultInterfaceType) }}",
+              "name": "{{ instance.interfaceName | default(defaultInterfaceName) }}",
+            },
+            {%- for iface in instance.interfaces | default([]) %}
+            {
+              {%- if iface.bridge is defined %}
+              "bridge": "{{ iface.bridge | default({}) }}",
+              {%- endif %}
+              "model": "{{ iface.type | default(defaultInterfaceType) }}",
+              "name": "{{ iface.name }}",
+            }{% if not loop.last %},{% endif %}
+            {%- endfor %}
+          ]
+        "_{{ instance._safe_name }}_networks": >-
+          [
+            {
+              {%- if instance.interfaceMultus is defined %}
+              "multus": {
+                "networkName": "{{ instance.interfaceMultus }}"
+              },
+              {%- endif %}
+              "name": "{{ instance.interfaceName | default(defaultInterfaceName) }}"
+            }{% if instance.interfaces | default([]) | length > 0 %},{% endif %}
+            {%- for iface in instance.interfaces | default([]) %}
+            {
+              {%- if iface.multus is defined %}
+              "multus": {
+                "networkName": "{{ iface.multus }}"
+              },
+              {%- endif %}
+              "name": "{{ iface.name }}"
+            }{% if not loop.last %},{% endif %}
+            {%- endfor %}
+          ]
+      loop: "{{ instances }}"
+      loop_control:
+        loop_var: instance
+      tags:
+        - data
+
+    - name: Set preprocessed data for debugging
+      set_fact:
+        "{{ '_' ~ instance._safe_name ~ 'preprocessed_data' }}":
+          #disks: "{{ lookup('vars', '_' ~ instance._safe_name ~ '_disks') }}"
+          volumes: "{{ lookup('vars', '_' ~ instance._safe_name ~ '_volumes') }}"
+          #interfaces: "{{ lookup('vars', '_' ~ instance._safe_name ~ '_interfaces') }}"
+          #networks: "{{ lookup('vars', '_' ~ instance._safe_name ~ '_networks') }}"
+      loop: "{{ instances }}"
+      loop_control:
+        loop_var: instance
+      tags:
+        - data
+
+    - name: Debug all preprocessed data
+      debug:
+        msg: "{{ lookup('vars', '_' ~ instance._safe_name ~ 'preprocessed_data') | to_json | indent(2) }}"
+      loop: "{{ instances }}"
+      loop_control:
+        loop_var: instance
+      tags:
+        - data
+
+    - name: Create OS Drive
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: v1
+        kind: PersistentVolumeClaim
+        namespace: "{{ instance.namespace }}"
+        state: present
+        definition:
+          metadata:
+            name: "{{ instance.name }}-{{ instance.rootFsName }}-pvc"
+          spec:
+              accessModes:
+                - "{{ instance.rootFsAccessMode | default(defaultDiskAccessMode) }}"
+              resources:
+                requests:
+                  storage: "{{ instance.rootFsSize | default(defaultDiskSize) }}"
+              storageClassName: "{{ instance.osImageStorageClass }}"
+              volumeMode: "{{ instance.rootFsVolumeMode | default(defaultDiskVolumeMode) }}"
+      loop: "{{ instances }}"
+      loop_control:
+        index_var: instance_index
+        loop_var: instance
+
+    # This task uses the `subelements` filter to iterate each instance and its disks.
+    # The filter returns a tuple (instance, disk), allowing iteration over both at once.
+    # Using `loop_control.loop_var` and `vars`, we split this tuple for clarity:
+    # `instance` is the main object (node), and `disk` is each of its subelements.
+    # Example input with `subelements` filter applied:
+    #   instances:
+    #     - name: node1
+    #       disks:
+    #         - name: data1
+    #         - name: data2
+    #     - name: node2
+    #       disks:
+    #         - name: data1
+    #     - name: node3
+    # Yields:
+    # [
+    #   [{ 'name': 'node1' }, { 'name': 'data1' }],
+    #   [{ 'name': 'node1' }, { 'name': 'data2' }],
+    #   [{ 'name': 'node2' }, { 'name': 'data1' }]
+    # ]
+    #
+    # We use loop_var and var to split this for clarity:
+    #   instance: { 'name': 'node1'}, disk: { 'name': 'data1' }
+    #
+    # So that we can template:
+    #   name: {{ instance.name }}-{{ disk.name }}
+    #
+    # Otherwise it would look like:
+    #   name: {{ item.0.name }}-{{ item.1.name }}
+
+    - name: Create Secondary Drive(s)
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: v1
+        kind: PersistentVolumeClaim
+        namespace: "{{ instance.namespace | default(defaultNamespace) }}"
+        state: present
+        definition:
+          metadata:
+            name: "{{ instance.name }}-{{ disk.name }}-pvc"
+          spec:
+            accessModes:
+              - "{{ disk.accessMode | default(defaultDiskAccessMode) }}"
+            resources:
+              requests:
+                storage: "{{ disk.size | default(defaultDiskSize) }}"
+            storageClassName: "{{ disk.storageClass | default(omit) }}"
+            volumeMode: "{{ disk.volumeMode | default(defaultDiskVolumeMode) }}"
+      loop: "{{ instances | subelements('disks', skip_missing=True) }}"
+      loop_control:
+        loop_var: instance_and_disk
+      vars:
+        instance: "{{ instance_and_disk[0] }}"  # The main item
+        disk: "{{ instance_and_disk[1] }}"      # The subelement
+
+    - name: Create Instance
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: v1
+        kind: VirtualMachine
+        namespace: "{{ instance.namespace | default(defaultNamespace) }}"
+        state: present
+        definition:
+          metadata:
+            name: "{{ instance.name }}"
+          spec:
+            running: true
+            template:
+              metadata:
+                labels:
+                  app: "{{ molecule_app_label }}"
+              spec:
+                architecture: "{{ instance.arch | default(defaultArch) }}"
+                domain:
+                  # The cores must be a uint, and ansible templating wanted to make everything a string
+                  cpu: >-
+                    {
+                      "cores": {{ instance.cores | default(defaultCores) | int }} 
+                    }
+                  devices:
+                    disks: "{{ lookup('vars', '_' ~ instance._safe_name ~ '_disks') }}"
+                    interfaces: "{{ lookup('vars', '_' ~ instance._safe_name ~ '_interfaces') }}"
+                  firmware:
+                    bootloader:
+                      efi:
+                        secureBoot: "{{ instance.secureBoot | default(false) }}"
+                  machine:
+                    type: "{{ instance.machineType | default(defaultMachineType) }}"
+                  memory:
+                    guest: "{{ instance.memory | default(defaultMemory) }}"
+                  resources:
+                    limits:
+                      cpu: "{{ instance.cores | default(defaultCores) | int }}"
+                      memory: "{{ instance.memory | default(defaultMemory) }}"
+                    requests:
+                      cpu: "{{ (instance.cores | default(defaultCores) | int) * ( instance.cpuRatio | default(defaultCpuRatio)) }}"
+                      memory: "{{ (instance.memory | default(defaultMemory) | int) * ( instance.memoryRatio | default(defaultMemoryRatio)) }}"
+                networks: "{{ lookup('vars', '_' ~ instance._safe_name ~ '_networks') }}"
+                volumes: "{{ lookup('vars', '_' ~ instance._safe_name ~ '_volumes') }}"
+
+      loop: "{{ instances }}"
+      loop_control:
+        index_var: instance_index
+        loop_var: instance
