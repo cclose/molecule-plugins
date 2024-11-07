@@ -57,82 +57,42 @@ class KubeVirt(Driver):
         driver:
           name: kubevirt
         platforms:
-          - name: instance
-            hostname: instance
-            image: image_name:tag
-            dockerfile: Dockerfile.j2
-            pull: True|False
-            pre_build_image: True|False
-            registry:
-              url: registry.example.com
-              credentials:
-                username: $USERNAME
-                password: $PASSWORD
-            override_command: True|False
-            command: sleep infinity
-            tty: True|False
-            pid_mode: host
-            privileged: True|False
-            security_opts:
-              - seccomp=unconfined
-            devices:
-              - /dev/sdc:/dev/xvdc:rwm
-            volumes:
-              - /sys/fs/cgroup:/sys/fs/cgroup:ro
-            tmpfs:
-              - /tmp
-              - /run
-            capabilities:
-              - SYS_ADMIN
-            exposed_ports:
-              - 53/udp
-              - 53/tcp
-            published_ports:
-              - 0.0.0.0:8053:53/udp
-              - 0.0.0.0:8053:53/tcp
-            ulimits:
-              - nofile=1024:1028
-            dns_servers:
-              - 8.8.8.8
-            network: host
-            etc_hosts: {'host1.example.com': '10.3.1.5'}
-            cert_path: /foo/bar/cert.pem
-            tls_verify: true
-            env:
-              FOO: bar
-            restart_policy: on-failure
-            restart_retries: 1
-            buildargs:
-              http_proxy: http://proxy.example.com:8080/
-            cgroup_manager: cgroupfs
-            storage_opt: overlay.mount_program=/usr/bin/fuse-overlayfs
-            storage_driver: overlay
-            systemd: true|false|always
-            extra_opts:
-              - --memory=128m
+          - name: example-vm
+            namespace: harvester-public
+            rootFsName: root-fs
+            rootFsSize: 10Gi
+            rootFsAccessMode: "ReadWriteMany"
+            rootFsVolumeMode: "Block"
+            osImageStorageClass: longhorn-image-pqsf2
+            disks:
+              - name: data
+                accessMode: "ReadWriteMany"
+                size: 15Gi
+                #storageClass: omit
+                volumeMode: "Block"
+                fileSystem:
+                  mount: true
+                  type: xfs
+                  path: /mnt/data
 
-    If specifying the `CMD`_ directive in your ``Dockerfile.j2`` or consuming a
-    built image which declares a ``CMD`` directive, then you must set
-    ``override_command: False``. Otherwise, Molecule takes care to honour the
-    value of the ``command`` key or uses the default of ``bash -c "while true;
-    do sleep 10000; done"`` to run the container until it is provisioned.
-
-    When attempting to utilize a container image with `systemd`_ as your init
-    system inside the container to simulate a real machine, make sure to set
-    the ``privileged``, ``command``, and ``environment`` values. An example
-    using the ``centos:8`` image is below:
-
-    .. note:: Do note that running containers in privileged mode is considerably
-              less secure.
-
-    .. code-block:: yaml
-
-        platforms:
-        - name: instance
-          image: centos:8
-          privileged: true
-          command: "/usr/sbin/init"
-          tty: True
+            arch: amd64
+            cloudInit:
+              type: cloudInitNoCloud
+              userData:
+              networkData:
+            cores: 2
+            cpuRatio: 0.5
+            interfaceType: virtio
+            interfaceMultus: hp-untagged #TODO Harvester specific
+            interfaceName: enp1s0
+            interfaces:
+              - name: enp1s1
+                type: virtio
+                bridge: {}
+            machineType: q35
+            memory: 2Gi
+            memoryRatio: 0.5
+            secureBoot: false
 
     .. code-block:: bash
 
@@ -153,41 +113,18 @@ class KubeVirt(Driver):
     .. code-block:: yaml
 
         driver:
-          name: podman
+          name: kubevirt
           safe_files:
             - foo
 
-    .. _`Podman`: https://podman.io/
-    .. _`systemd`: https://www.freedesktop.org/wiki/Software/systemd/
-    .. _`CMD`: https://docs.docker.com/engine/reference/builder/#cmd
+    .. _`KubeVirt`: https://kubevirt.io/
     """
 
     def __init__(self, config=None) -> None:
-        """Construct Harvester."""
-        print("Booting KubeVirt")
+        """Construct KubeVirt."""
         super().__init__(config)
-        self._name = "kubevirt"
-        # To change the kubevirt kubectl executable, set environment variable
-        # MOLECULE_HARVESTER_KUBECTL
-        # An example could be MOLECULE_HARVESTER_KUBECTL=kubevirt-remote
-        self.harvester_exec = os.environ.get("MOLECULE_HARVESTER_KUBECTL", "kubectl")
-        self._harvester_cmd = None
-        self._harvester_kubeconfig = None
+        self._name = "custom-kubevirt"
         self._sanity_passed = False
-
-    @property
-    def harvester_cmd(self):
-        """Lazily calculate the kubevirt command."""
-        if not self._harvester_cmd:
-            self._harvester_cmd = which(self.harvester_exec)
-            if not self._harvester_cmd:
-                msg = f"command not found in PATH {self.harvester_exec}"
-                util.sysexit_with_message(msg)
-        return self._harvester_cmd
-
-    @property
-    def harvester_kubeconfig(self):
-        return self._harvester_kubeconfig
 
     @property
     def name(self):

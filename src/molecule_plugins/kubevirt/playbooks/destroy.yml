@@ -9,21 +9,7 @@
     # TODO Make this exist
     ssh_identity_file: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssh_key"
     kubeconfig_path: "./harvester.yaml"
-    instances:
-      - name: example-vm
-        namespace: harvester-public
-        rootFsName: root-fs
-        osImageStorageClass: longhorn-image-pqsf2
-        rootFsSize: 10Gi
-        rootFsStorage: osImageStorageClass
-        disks:
-          - name: data
-            size: 15Gi
-            fileSystem:
-              mount: true
-              type: xfs
-              path: /mnt/data
-        sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDkCFce63lUowoayv8qvt6aHY26igytm1FdzMy8mbkP2 CoryClose@cclose-sei-mbp.local"
+    instances: "{{ molecule_yml.platforms }}"
 
   tasks:
 
