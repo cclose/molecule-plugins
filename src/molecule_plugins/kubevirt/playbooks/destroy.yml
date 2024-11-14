@@ -23,6 +23,7 @@
         definition:
           metadata:
             name: "{{ instance.name }}"
+      register: server
       loop: "{{ instances }}"
       loop_control:
         index_var: instance_index
@@ -62,3 +63,18 @@
       loop_control:
         index_var: instance_index
         loop_var: instance
+
+    # Mandatory configuration for Molecule to function.
+    - name: Clear Instance Configs
+      ansible.builtin.set_fact:
+        instance_conf: { }
+
+    - name: Dump Instance Config
+      ansible.builtin.copy:
+        content: |
+          # Molecule managed
+
+          {{ instance_conf | to_json | from_json | to_yaml }}
+        dest: "{{ molecule_instance_config }}"
+        mode: "0600"
+      when: server.changed | default(false) | bool  # noqa no-handler

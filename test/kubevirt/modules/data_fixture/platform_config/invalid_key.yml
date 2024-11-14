@@ -1,0 +1,3 @@
+- name: testnode
+  rootFsStorageClass: harvester-dv-ubuntu22
+  cpus: 10

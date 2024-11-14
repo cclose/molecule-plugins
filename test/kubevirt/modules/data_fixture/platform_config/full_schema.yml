@@ -1,0 +1,35 @@
+- name: example-vm
+  namespace: harvester-public
+  rootFsName: root-fs
+  rootFsSize: 10Gi
+  rootFsAccessMode: "ReadWriteMany"
+  rootFsVolumeMode: "Block"
+  rootFsStorageClass: longhorn-image-pqsf2
+  disks:
+    - name: data
+      accessMode: "ReadWriteMany"
+      size: 15Gi
+      storageClass: longhorn
+      volumeMode: "Block"
+      fileSystem:
+        mount: true
+        type: xfs
+        path: /mnt/data
+  arch: amd64
+  cloudInit:
+    type: cloudInitNoCloud
+    userData:
+    networkData:
+  cores: 2
+  cpuRatio: 0.5
+  interfaceType: virtio
+  interfaceMultus: hp-untagged #TODO Harvester specific
+  interfaceName: enp1s0
+  interfaces:
+    - name: enp1s1
+      type: virtio
+      bridge: {}
+  machineType: q35
+  memory: 2Gi
+  memoryRatio: 0.5
+  secureBoot: false

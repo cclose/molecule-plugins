@@ -1,0 +1,2 @@
+- name: testnode
+  rootFsStorageClass: harvester-dv-ubuntu22

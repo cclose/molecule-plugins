@@ -55,7 +55,7 @@ class KubeVirt(Driver):
     .. code-block:: yaml
 
         driver:
-          name: kubevirt
+          name: custom_kubevirt
         platforms:
           - name: example-vm
             namespace: harvester-public
@@ -63,7 +63,7 @@ class KubeVirt(Driver):
             rootFsSize: 10Gi
             rootFsAccessMode: "ReadWriteMany"
             rootFsVolumeMode: "Block"
-            osImageStorageClass: longhorn-image-pqsf2
+            rootFsStorageClass: longhorn-image-pqsf2
             disks:
               - name: data
                 accessMode: "ReadWriteMany"
@@ -113,7 +113,7 @@ class KubeVirt(Driver):
     .. code-block:: yaml
 
         driver:
-          name: kubevirt
+          name: custom_kubevirt
           safe_files:
             - foo
 
@@ -140,10 +140,10 @@ class KubeVirt(Driver):
         connection_options = " ".join(self.ssh_connection_options)
 
         return (
-            "ssh {{address}} "
-            "-l {{user}} "
-            "-p {{port}} "
-            "-i {{identity_file}} "
+            "ssh {address} "
+            "-l {user} "
+            "-p {port} "
+            "-i {identity_file} "
             f"{connection_options}"
         )
 
@@ -208,4 +208,11 @@ class KubeVirt(Driver):
     @property
     def required_collections(self) -> dict[str, str]:
         """Return collections dict containing names and versions required."""
-        return {"ansible.posix": "1.3.0", "kubernetes.core": "3"}
+        return {
+            "ansible.posix": "1.3.0",
+            "kubernetes.core": "3",
+        }
+
+    def modules_dir(self):
+        return os.path.join(os.path.dirname(__file__), "modules")
+
