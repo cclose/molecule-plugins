@@ -1,0 +1,28 @@
+dependency:
+  name: galaxy
+driver:
+  name: custom-kubevirt
+platforms:
+  - name: default
+    rootFsStorageClass: "longhorn-image-pqsf2"
+    rootFsName: root-fs
+    namespace: harvester-public
+    interfaceMultus: hp-untagged
+    cloudInit:
+      networkData: |
+        network:
+          version: 2
+          ethernets:
+            enp1s0:
+              dhcp4: true
+              gateway4: 10.1.250.1
+              nameservers:
+                addresses:
+                  - 10.1.250.222
+                  - 10.1.20.20
+                  - 8.8.8.8
+                  - 8.8.4.4
+provisioner:
+  name: ansible
+verifier:
+  name: ansible

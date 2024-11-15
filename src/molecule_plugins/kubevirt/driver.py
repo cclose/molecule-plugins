@@ -32,6 +32,9 @@ from molecule.api import Driver, MoleculeRuntimeWarning
 from molecule.constants import RC_SETUP_ERROR
 from molecule.util import sysexit_with_message
 
+from kubernetes import client, config
+from kubernetes.client.rest import ApiException
+
 log = logger.get_logger(__name__)
 
 
@@ -161,18 +164,64 @@ class KubeVirt(Driver):
 
         return util.merge_dicts(d, self._get_instance_config(instance_name))
 
+    def get_kubeconfig_file(self):
+        # Get the absolute path of the current file (driver.py)
+        driver_path = os.path.abspath(__file__)
+
+        # Navigate to the directory containing driver.py
+        driver_dir = os.path.dirname(driver_path)
+
+        # TODO Fix hardcoding here
+        # Construct the path to the 'playbooks/harvester.yaml'
+        # Assuming 'kubeconfig' is either in the same directory or a known relative path
+        kubeconfig_path = os.path.join(driver_dir, 'playbooks', 'harvester.yaml')
+
+        # Check if the file exists
+        if not os.path.exists(kubeconfig_path):
+            raise FileNotFoundError(f"Kubeconfig file not found at: {kubeconfig_path}")
+
+        # Load kubeconfig using the constructed path
+        return kubeconfig_path
+
+
     def ansible_connection_options(self, instance_name):
         try:
-            d = self._get_instance_config(instance_name)
+            config.load_kube_config(config_file=self.get_kubeconfig_file())
 
-            return {
-                "ansible_user": d["user"],
-                "ansible_host": d["address"],
+            d = self._get_instance_config(instance_name)
+            namespace = d.get('namespace')
+            pod_name = d.get('pod_name')
+
+            if not namespace or not pod_name:
+                raise ValueError(f"Namespace or Pod Name missing for instance {instance_name}")
+
+            # TODO Maybe this should be a custom-module??
+            vmi_client = client.CustomObjectsApi()
+            vmi = vmi_client.get_namespaced_custom_object(
+                group = "kubevirt.io",  # The group for KubeVirt CRDs
+                version = "v1",  # API version for VMI
+                namespace = namespace,
+                plural = "virtualmachineinstances",  # Plural for VirtualMachineInstance
+                name = pod_name
+            )
+            vmi_ip = vmi['status'].get('interfaces', [{}])[0].get('ipAddress', None)
+            if not vmi_ip:
+                # TODO retry-back-off here if IP is not ready
+                raise ValueError(f"Pod IP not found for pod {pod_name} in namespace {namespace}")
+
+            options = {
+                "ansible_user": "ubuntu", #d["user"],
+                "ansible_password": "ubuntu",
+                "ansible_host": vmi_ip,
                 "ansible_port": d["port"],
-                "ansible_private_key_file": d["identity_file"],
+                #"ansible_private_key_file": d["identity_file"],
                 "connection": "ssh",
                 "ansible_ssh_common_args": " ".join(self.ssh_connection_options),
             }
+
+            print(options)
+
+            return options
         except StopIteration:
             return {}
         except OSError:

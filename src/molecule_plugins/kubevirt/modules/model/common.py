@@ -15,7 +15,7 @@ class DataClassDictValidatorMixin:
     @classmethod
     def validate_dict_keys(cls, data: dict, required_keys: set = None):
         """Compare dict keys with the class attributes."""
-        Optional
+
         # Get class name
         class_name = cls.__name__
         class_fields = {field.name for field in fields(cls)}

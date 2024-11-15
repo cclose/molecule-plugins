@@ -10,8 +10,29 @@
     ssh_identity_file: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssh_key"
     kubeconfig_path: "./harvester.yaml"
     instances: "{{ molecule_yml.platforms }}"
+    default_run_id: "{{ lookup('password', '/dev/null', chars=['ascii_lowercase', 'digits'], length=5, seed=now(fmt='%s')) }}"
+    default_run_config:
+      run_id: "{{ molecule_yaml.driver.run_id | default(default_run_id) }}"
+      run_prefix: "{{ molecule_yaml.driver.run_prefix | default('molecule-') }}"
+
+    run_config_path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/run-config.yml"
+    run_config_from_file: "{{ (lookup('file', run_config_path, errors='ignore') or '{}') | from_yaml }}"
+    run_config: '{{ default_run_config | combine(run_config_from_file) }}'
 
   tasks:
+    - name: Load Instance Config
+      kubevirt_driver_instance_config:
+        action: load
+        path: "{{ molecule_instance_config }}"
+      register: instance_config
+
+    - name: Process Instance and Platform Data
+      kubevirt_driver_process_instance_data:
+        action: prepare
+        instance_config: "{{ instance_config.instance_config }}"
+        platform_config: "{{ instances }}"
+        run_config: "{{ run_config }}"
+      register: instance_data
 
     - name: Destroy Instance
       kubernetes.core.k8s:
@@ -22,9 +43,9 @@
         state: absent
         definition:
           metadata:
-            name: "{{ instance.name }}"
+            name: "{{ instance.pod_name }}"
       register: server
-      loop: "{{ instances }}"
+      loop: "{{ instance_data.instance_data }}"
       loop_control:
         index_var: instance_index
         loop_var: instance
@@ -32,7 +53,7 @@
     # For an explanation of this Loop structure, see Create Secondary Drive(s) task
     # in Create.yml playbook
 
-    - name: Destroy Secondary Drive(s)
+    - name: Destroy Drive(s)
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         api_version: v1
@@ -41,28 +62,13 @@
         state: absent
         definition:
           metadata:
-            name: "{{ instance.name }}-{{ disk.name }}-pvc"
-      loop: "{{ instances | subelements('disks', skip_missing=True) }}"
+            name: "{{ disk.name }}"
+      loop: "{{ instance_data.instance_data | subelements('pvcs', skip_missing=True) }}"
       loop_control:
         loop_var: instance_and_disk
       vars:
         instance: "{{ instance_and_disk[0] }}"  # The main item
         disk: "{{ instance_and_disk[1] }}"      # The subelement
-
-    - name: Destroy OS Drive
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        api_version: v1
-        kind: PersistentVolumeClaim
-        namespace: "{{ instance.namespace }}"
-        state: absent
-        definition:
-          metadata:
-            name: "{{ instance.name }}-{{ instance.rootFsName }}-pvc"
-      loop: "{{ instances }}"
-      loop_control:
-        index_var: instance_index
-        loop_var: instance
 
     # Mandatory configuration for Molecule to function.
     - name: Clear Instance Configs

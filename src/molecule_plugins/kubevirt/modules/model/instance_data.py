@@ -1,9 +1,13 @@
 from typing import Optional
 from dataclasses import dataclass
+
+import humanfriendly
+
 from molecule_plugins.kubevirt.modules.model.common import DictParserMixin
 from molecule_plugins.kubevirt.modules.model.instance_config import InstanceConfig
 from molecule_plugins.kubevirt.modules.model.platform_config import PlatformConfig
 from base64 import b64encode
+from humanfriendly import parse_size, format_size
 
 from poetry.console.commands import self
 
@@ -30,11 +34,12 @@ class InstanceMultus(DictParserMixin):
 @dataclass
 class InstanceNetwork(DictParserMixin):
     name: str
-    multus: Optional[InstanceMultus]
+    multus: Optional[InstanceMultus] = None
 
 @dataclass
 class InstancePVC(DictParserMixin):
     name: str
+    diskName: str
     accessMode: str
     size: str
     storageClass: str
@@ -114,11 +119,43 @@ class InstanceData(DictParserMixin):
     run_name: str
     pod_name: str
     molecule_id: str
+    # TODO
+    arch: str
+    cores: int
+    cpuRatio: float
+    machineType: str
+    memory: str
+    memoryRatio: float
+    namespace: str
+    secureBoot: bool
+    # END TODO
     disks: list[InstanceDisk]
     interfaces: list[InstanceInterface]
     networks: list[InstanceNetwork]
     pvcs: list[InstancePVC]
     volumes: list[InstanceVolume]
+
+    @property
+    def cpu_requests(self) -> float:
+        return self.cores * self.cpuRatio
+
+    @property
+    def memory_requests(self) -> str:
+        mem = self.memory.strip(' ')
+        # If using binary size without the B, add it
+        if mem.endswith('i'):
+            mem = f"{mem}B"
+        memR = parse_size(mem) * self.memoryRatio
+        memSize = format_size(memR, binary=True).replace(' ', '')
+
+        if memSize.endswith('bytes'):
+            raise humanfriendly.InvalidSize("Must use a unit greater than Bytes (B|Bi)!")
+
+        if memSize.endswith('B'):
+            memSize = memSize[:-1] # Subtract trailing B
+        # extract size from units
+
+        return memSize
 
     def to_dict(self):
         return {
@@ -127,6 +164,16 @@ class InstanceData(DictParserMixin):
             "run_name": self.run_name,
             "pod_name": self.pod_name,
             "molecule_id": self.molecule_id,
+            "arch": self.arch,
+            "cores": self.cores,
+            "cpuRatio": self.cpuRatio,
+            "cpuRequests": self.cpu_requests,
+            "machineType": self.machineType,
+            "memory": self.memory,
+            "memoryRatio": self.memoryRatio,
+            "memoryRequests": self.memory_requests,
+            "namespace": self.namespace,
+            "secureBoot": self.secureBoot,
             "disks": [disk.to_dict() for disk in self.disks if disk is not None],
             "interfaces": [iface.to_dict() for iface in self.interfaces if iface is not None],
             "networks": [network.to_dict() for network in self.networks if network is not None],
@@ -160,6 +207,7 @@ class InstanceData(DictParserMixin):
         pvcs = [
             InstancePVC(
                 name=ic.get_subresource_name(pc.rootFsName),
+                diskName=pc.rootFsName,
                 accessMode=pc.rootFsAccessMode,
                 size=pc.rootFsSize,
                 storageClass=pc.rootFsStorageClass,
@@ -184,6 +232,7 @@ class InstanceData(DictParserMixin):
             ))
             pvcs.append(InstancePVC(
                 name=ic.get_subresource_name(disk.name),
+                diskName=disk.name,
                 accessMode=disk.accessMode,
                 size=disk.size,
                 storageClass=disk.storageClass,
@@ -224,6 +273,14 @@ class InstanceData(DictParserMixin):
             run_name=ic.run_name,
             pod_name=ic.pod_name,
             molecule_id=ic.molecule_id,
+            arch=pc.arch,
+            cores=pc.cores,
+            cpuRatio=pc.cpuRatio,
+            machineType=pc.machineType,
+            memory=pc.memory,
+            memoryRatio=pc.memoryRatio,
+            namespace=pc.namespace,
+            secureBoot=pc.secureBoot,
             disks=disks,
             interfaces=interfaces,
             networks=networks,

@@ -107,12 +107,13 @@ def main():
             except FileNotFoundError:
                 instance_config = []
 
-            result['instance_config'] = instance_config
+            result['instance_config'] = instance_config.to_list() \
+                if isinstance(instance_config, InstanceConfigList) else instance_config
             result['instance_yml'] = instance_yml
 
         elif action == 'save':
             if 'instance_data' in module.params:
-                instance_data = InstanceConfig.from_dict(module.params["instance_data"])
+                instance_data = InstanceConfigList.from_dict(module.params["instance_data"])
                 instance_yml = instance_data.to_yaml()
                 result['instance_yml'] = instance_yml
             else:

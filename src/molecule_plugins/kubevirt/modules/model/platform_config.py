@@ -4,6 +4,7 @@ from typing import List, Optional, Dict
 from molecule_plugins.kubevirt.modules.model.common import DataClassDictValidatorMixin
 from molecule_plugins.kubevirt.modules.model.defaults import DefaultConfig
 from abc import ABC, abstractmethod
+import humanfriendly
 
 
 @dataclass
@@ -90,32 +91,35 @@ class PlatformConfig(DataClassDictValidatorMixin):
     rootFsAccessMode: str
     rootFsType: str
     rootFsVolumeMode: str
-    rootFsStorageClass: Optional[str]
+    rootFsStorageClass: str
     disks: List[DiskConfig]
     arch: str
-    cloudInit: Optional[CloudInitConfig]
     cores: int
     cpuRatio: float
     interfaceType: str
-    interfaceMultus: Optional[str]
     interfaceName: str
     interfaces: List[InterfaceConfig]
     machineType: str
     memory: str
     memoryRatio: float
     secureBoot: bool
+    # Optional props have to go last
+    cloudInit: Optional[CloudInitConfig] = None
+    interfaceMultus: Optional[str] = None
 
     REQUIRED_KEYS = { "name", "rootFsStorageClass" }
+
+    def __post_init__(self):
+        """
+        throws: InvalidSize if memory is not a valid binary number
+        """
+        # verify memory is correct
+        humanfriendly.parse_size(self.memory)
 
     @classmethod
     def from_dict(cls, data: dict, defaults: DefaultConfig) -> "PlatformConfig":
         cls.validate_dict_keys(data, cls.REQUIRED_KEYS)
-        # Verify uniqueness of name
-        if "rootFsStorageClass" not in data:
-            # TODO in the future we can be more flexible about how root-fs sources it's
-            # image data, but right now we only support storageClasses
-            raise ValueError('platform item is missing required "rootFsStorageClass" '
-                             'field. Will be unable to set Operating System without')
+
         return cls(
             # Required
             name=data["name"],

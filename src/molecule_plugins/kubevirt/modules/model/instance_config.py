@@ -15,7 +15,9 @@ class InstanceConfig:
     port: int = 22
     user: str = ""
     # K8S properties
+    namespace: str = ""
     id: str = ""
+    uid: str = ""
     # optional ssh props
     identity_file: Optional[str] = None
     password: Optional[str] = None
@@ -126,6 +128,8 @@ class InstanceConfig:
             identity_file=data.get('identity_file'),
             password=data.get('password'),
             id=data['id'],
+            namespace=data['namespace'],
+            uid=data.get('uid'),
             run_id=data['run_id'],
         )
 
@@ -158,10 +162,11 @@ class InstanceConfig:
         return instance
 
     @classmethod
-    def from_name_and_run(cls, name, run_id):
+    def from_name_and_run(cls, name, run_id, namespace=None):
         return cls(
             instance=name,
             run_id=run_id,
+            namespace=namespace if namespace is not None else None,
         )
 
     @property
@@ -182,7 +187,9 @@ class InstanceConfig:
             'identity_file': self.identity_file,
             'password': self.password,
             'dns_name': self.dns_name,
+            'namespace': self.namespace,
             'id': self.id,
+            'uid': self.uid,
             'pod_id': self.pod_id,
             'pod_name': self.pod_name,
             'run_id': self.run_id
@@ -196,6 +203,16 @@ class InstanceConfigList:
     """
     instance_configs: list[InstanceConfig]
 
+    def get_instance(self, instance_name: str) -> Optional[InstanceConfig]:
+        # Loops instances and returns the first one that has a matching name
+        return next((instance for instance in self.instance_configs
+                     if instance.instance == instance_name), None)
+
+    def get_instance_by_molecule_id(self, molecule_id: str) -> Optional[InstanceConfig]:
+        # Loops instances and returns the first one that has a matching molecule_id
+        return next((instance for instance in self.instance_configs
+                     if instance.molecule_id == molecule_id), None)
+
     @classmethod
     def from_yaml(cls, yaml_content: str):
         """Load a list of InstanceConfig objects from a YAML string."""
@@ -207,4 +224,22 @@ class InstanceConfigList:
         """Convert the list of InstanceConfig objects to a YAML string."""
         return yaml.dump([config.to_dict() for config in self.instance_configs], default_flow_style=False)
 
+    @classmethod
+    def from_dict(cls, data: list):
+        """
+        The method is called "from dict" but it's actually "from list". We just call it
+        dict because it's a list of dicts and it's simpler to think that way
+        """
+        ic_list = []
+        for item in data:
+            ic_list.append(InstanceConfig.from_dict(item))
 
+        return cls(ic_list)
+
+    def to_dict(self) -> dict:
+        return {
+            'instance_configs': self.to_list()
+        }
+
+    def to_list(self) -> list:
+        return [item.to_dict() for item in self.instance_configs]

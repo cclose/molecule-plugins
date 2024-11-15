@@ -18,8 +18,47 @@
   arch: amd64
   cloudInit:
     type: cloudInitNoCloud
-    userData:
-    networkData:
+    userData: |
+      #cloud-config
+      password: molecule
+      chpasswd: { expire: False }
+      ssh_pwauth: True
+      package_update: true
+      package_upgrade: true
+    
+      chpasswd:
+        list: |
+          ubuntu:ubuntu
+        expire: false
+    
+      packages:
+        - curl
+        - git
+        - openssl
+        - python3
+        - python3-apt
+        - qemu-guest-agent
+        - wget
+      runcmd:
+        - - systemctl
+          - enable
+          - --now
+          - qemu-guest-agent.service
+      ssh_authorized_keys:
+        - {{ sshPublicKey }}
+    networkData: |
+      network:
+        version: 2
+        ethernets:
+          enp1s0:
+            dhcp4: true
+            gateway4: 10.1.250.1
+            nameservers:
+              addresses:
+                - 10.1.250.222
+                - 10.1.20.20
+                - 8.8.8.8
+                - 8.8.4.4
   cores: 2
   cpuRatio: 0.5
   interfaceType: virtio

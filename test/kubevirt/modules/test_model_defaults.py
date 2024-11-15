@@ -20,7 +20,7 @@ def test_model_default_config_todict():
     assert default_dict["machine_type"] == "q35"
     assert default_dict["memory"] == "2Gi"
     assert default_dict["namespace"] == "default"
-    assert default_dict["root_fs_name"] == "root-fs"
+    assert default_dict["root_fs_name"] == "rootfs"
     assert default_dict["secure_boot"] == False
     assert default_dict["ssh_port"] == "22"
     assert default_dict["ssh_user"] == "ubuntu"
@@ -44,7 +44,7 @@ def test_model_default_config_fromdict():
     assert defaults.machine_type == "q35"
     assert defaults.memory == "2Gi"
     assert defaults.namespace == "default"
-    assert defaults.root_fs_name == "root-fs"
+    assert defaults.root_fs_name == "rootfs"
     assert defaults.secure_boot == False
     assert defaults.ssh_port == "22"
     assert defaults.ssh_user == "ubuntu"

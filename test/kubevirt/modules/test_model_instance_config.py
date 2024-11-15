@@ -210,7 +210,6 @@ def test_instance_config_generate_k8s_subresource_name(dns_name, sub_name, expec
 
 def test_instance_config_generate_instance_id():
     instance_id = InstanceConfig.generate_instance_id()
-    assert len(instance_id) == InstanceConfig._POD_ID_LEN  # The length should be exactly 6
     assert all(c in '0123456789abcdef' for c in instance_id)  # It should be a hex string
 
 def test_instance_config_dns_name_property():
@@ -225,6 +224,7 @@ def test_instance_config_run_name_property():
 
 def test_instance_config_pod_id_property():
     obj = InstanceConfig(instance="test-instance", run_id="run123", id="1234567890abcdef")
+    assert len(obj.pod_id) == InstanceConfig._POD_ID_LEN  # The length should be exactly 6
     assert obj.pod_id == "123456"  # Only the first 6 characters should be used
 
 def test_instance_config_pod_name_property():
