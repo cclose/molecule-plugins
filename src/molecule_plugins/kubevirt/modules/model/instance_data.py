@@ -11,6 +11,8 @@ from humanfriendly import parse_size, format_size
 
 from poetry.console.commands import self
 
+from molecule_plugins.kubevirt.modules.model.run_config import RunConfig
+
 
 @dataclass
 class InstanceDiskBus(DictParserMixin):
@@ -182,7 +184,7 @@ class InstanceData(DictParserMixin):
         }
 
     @classmethod
-    def from_config(cls, ic: InstanceConfig, pc: PlatformConfig):
+    def from_config(cls, ic: InstanceConfig, pc: PlatformConfig, rc: RunConfig):
         disks = [
             InstanceDisk(
                 name=pc.rootFsName,
@@ -246,11 +248,17 @@ class InstanceData(DictParserMixin):
             ))
 
         if pc.cloudInit is not None:
+            user_data = None
+            if pc.cloudInit.userData:
+                if rc.ssh_key_token and rc.ssh_public_key:
+                    # Replace the SSH Key token with the actual contents
+                    user_data = pc.cloudInit.userData.replace(rc.ssh_key_token, rc.ssh_public_key)
+
             volumes.append(InstanceVolume(
                 name="cloudinitdisk",
                 cloudInitNoCloud=InstanceCloudInit(
-                    userDataBase64=b64encode(pc.cloudInit.userData.encode("utf-8"))
-                    if pc.cloudInit.userData else None,
+                    userDataBase64=b64encode(user_data.encode("utf-8"))
+                    if user_data else None,
                     networkDataBase64=b64encode(pc.cloudInit.networkData.encode("utf-8"))
                     if pc.cloudInit.networkData else None,
                 ) if pc.cloudInit.type == "cloudInitNoCloud" else None,

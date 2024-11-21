@@ -22,6 +22,7 @@
 
 import os
 import warnings
+from os.path import basename
 from shutil import which
 
 from ansible_compat.runtime import Runtime
@@ -34,6 +35,8 @@ from molecule.util import sysexit_with_message
 
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
+
+from molecule_plugins.kubevirt.modules.util.kube import get_vmi_ip
 
 log = logger.get_logger(__name__)
 
@@ -126,6 +129,13 @@ class KubeVirt(Driver):
     def __init__(self, config=None) -> None:
         """Construct KubeVirt."""
         super().__init__(config)
+        if config is not None:
+            print(f"Run UUID: {config._run_uuid}")
+            print(f"Scenarior: {config.scenario.name}")
+            print(f"SDir: {config.scenario.directory}")
+            print(f"EDir: {config.scenario.ephemeral_directory}")
+            print(f"PDir: {config.project_directory}")
+            print(f"PDirBN: {basename(config.project_directory)}")
         self._name = "custom-kubevirt"
         self._sanity_passed = False
 
@@ -153,28 +163,42 @@ class KubeVirt(Driver):
     @property
     def default_safe_files(self):
         # TODO
-        return [os.path.join(self._config.scenario.ephemeral_directory, "Dockerfile")]
+        return [
+            self.instance_config,
+            os.path.join(self._config.scenario.ephemeral_directory, ".vagrant")
+        ]
 
     @property
     def default_ssh_connection_options(self):
         return self._get_ssh_connection_options()
 
     def login_options(self, instance_name):
-        d = {"instance": instance_name}
+        ic = self._get_instance_config(instance_name)
+        log_opts = {
+            "instance": instance_name,
+            "address": ic["address"] if ic.get("address", "") else (
+                self.get_instance_address(instance_name)),
+            "user": ic.get("user"),
+            "port": ic.get("port"),
+            "identity_file": ic.get("identity_file"),
+        }
 
-        return util.merge_dicts(d, self._get_instance_config(instance_name))
+        return log_opts
 
     def get_kubeconfig_file(self):
-        # Get the absolute path of the current file (driver.py)
-        driver_path = os.path.abspath(__file__)
+        driver = self._config.config.get("driver")
+        if not driver:
+            raise ValueError("Driver configuration is missing in Molecule configuration.")
 
-        # Navigate to the directory containing driver.py
-        driver_dir = os.path.dirname(driver_path)
+        # Ensure `kubeconfig` is present and points to a valid file
+        kubeconfig = driver.get("kubeconfig")
+        if not kubeconfig:
+            raise ValueError("Driver configuration is missing the 'kubeconfig' parameter.")
 
-        # TODO Fix hardcoding here
-        # Construct the path to the 'playbooks/harvester.yaml'
-        # Assuming 'kubeconfig' is either in the same directory or a known relative path
-        kubeconfig_path = os.path.join(driver_dir, 'playbooks', 'harvester.yaml')
+        # Resolve the path relative to the molecule.yml file
+        kubeconfig_path = os.path.join(self._config.scenario.directory, kubeconfig)
+        if not os.path.isfile(kubeconfig_path):
+            raise FileNotFoundError(f"Kubeconfig file does not exist: {kubeconfig_path}")
 
         # Check if the file exists
         if not os.path.exists(kubeconfig_path):
@@ -183,43 +207,43 @@ class KubeVirt(Driver):
         # Load kubeconfig using the constructed path
         return kubeconfig_path
 
+    def get_instance_address(self, instance_name):
+        ic = self._get_instance_config(instance_name)
+        namespace = ic.get('namespace')
+        pod_name = ic.get('pod_name')
+
+        pod_ip_not_found = ValueError(f"Pod IP not found for pod {pod_name} in namespace {namespace}")
+
+        try:
+            vmi_ip = get_vmi_ip(pod_name,
+                                namespace=namespace,
+                                kubeconfig_path=self.get_kubeconfig_file(),
+                                wait_for_lease=True,
+                                )
+
+            if not vmi_ip:
+                raise pod_ip_not_found
+
+        except TimeoutError as e:
+            raise pod_ip_not_found
+
+        return vmi_ip
 
     def ansible_connection_options(self, instance_name):
         try:
-            config.load_kube_config(config_file=self.get_kubeconfig_file())
-
-            d = self._get_instance_config(instance_name)
-            namespace = d.get('namespace')
-            pod_name = d.get('pod_name')
-
-            if not namespace or not pod_name:
-                raise ValueError(f"Namespace or Pod Name missing for instance {instance_name}")
-
-            # TODO Maybe this should be a custom-module??
-            vmi_client = client.CustomObjectsApi()
-            vmi = vmi_client.get_namespaced_custom_object(
-                group = "kubevirt.io",  # The group for KubeVirt CRDs
-                version = "v1",  # API version for VMI
-                namespace = namespace,
-                plural = "virtualmachineinstances",  # Plural for VirtualMachineInstance
-                name = pod_name
-            )
-            vmi_ip = vmi['status'].get('interfaces', [{}])[0].get('ipAddress', None)
-            if not vmi_ip:
-                # TODO retry-back-off here if IP is not ready
-                raise ValueError(f"Pod IP not found for pod {pod_name} in namespace {namespace}")
+            ic = self._get_instance_config(instance_name)
+            instance_address = ic["address"] if ic.get("address", "") else (
+                self.get_instance_address(instance_name))
 
             options = {
                 "ansible_user": "ubuntu", #d["user"],
                 "ansible_password": "ubuntu",
-                "ansible_host": vmi_ip,
-                "ansible_port": d["port"],
-                #"ansible_private_key_file": d["identity_file"],
+                "ansible_host": instance_address,
+                "ansible_port": ic["port"],
+                "ansible_private_key_file": ic["identity_file"],
                 "connection": "ssh",
                 "ansible_ssh_common_args": " ".join(self.ssh_connection_options),
             }
-
-            print(options)
 
             return options
         except StopIteration:
@@ -237,8 +261,10 @@ class KubeVirt(Driver):
         )
 
     def sanity_checks(self):
+        print("Running sanity checks")
         """Implement Harvester driver sanity checks."""
         if self._sanity_passed:
+            print("Sanity passed already")
             return
 
         log.info("Sanity checks: '%s'", self._name)
@@ -252,6 +278,15 @@ class KubeVirt(Driver):
                 "Do not raise any bugs if your tests are failing with current configuration.",
                 category=MoleculeRuntimeWarning,
             )
+
+        driver = self._config.config.get("driver")
+        if not driver:
+            raise ValueError("Driver configuration is missing in Molecule configuration.")
+
+        # Ensure `kubeconfig` is present and points to a valid file
+        kc = self.get_kubeconfig_file()
+        # make sure kubeconfig abs path was set
+
         self._sanity_passed = True
 
     @property

@@ -18,14 +18,13 @@
     run_config: '{{ default_run_config | combine(run_config_from_file) }}'
 
     ansible_python_interpreter: /Users/CoryClose/PythonVEnvs/molecule-plugins/.venv/bin/python3
-    # TODO Make this exist
-    ssh_identity_file: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssh_key"
-    kubeconfig_path: "./harvester.yaml"
     # Defaults
     # Molecule Vars
-    molecule_scenario_name: "{{ lookup('env', 'MOLECULE_SCENARIO_NAME') }}"
+    molecule_scenario_name: "{{ lookup('env', 'MOLECULE_SCENARIO_DIRECTORY') }}"
+    molecule_ephemeral_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}"
+    #kubeconfig_path: "{{ [lookup('env', 'MOLECULE_PROJECT_DIRECTORY'), molecule_yml.driver.kubeconfig] | path_join }}"
+    kubeconfig_path: "{{ molecule_yml.driver.kubeconfig | realpath }}"
     molecule_app_label: "{{ run_config.run_prefix }}-{{ run_config.run_id }}"
-    sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDkCFce63lUowoayv8qvt6aHY26igytm1FdzMy8mbkP2 CoryClose@cclose-sei-mbp.local"
     instances: "{{ molecule_yml.platforms }}"
 
     #    cloudInit:
@@ -73,6 +72,29 @@
     #                  - 8.8.4.4
 
   tasks:
+    - block:
+      - name: Generate SSH Keypair
+        community.crypto.openssh_keypair:
+          path: "{{ molecule_ephemeral_dir }}/id_ed25512_{{ run_config.run_id }}"
+          type: "{{ kubevirt_sshkey_type | default('ed25519') }}"
+          state: present
+        register: kubevirt_ssh_key
+
+      - name: Store SSH Keys data in run_config
+        ansible.builtin.set_fact:
+          run_config: >-
+            {{
+              run_config |
+              combine({
+                'ssh_key_path': kubevirt_ssh_key.filename,
+                'ssh_public_key': kubevirt_ssh_key.public_key,
+                'ssh_key_token': 'SSH_PUBLIC_KEY',
+              })
+            }}
+
+      when:
+        - kubevirt_gen_sshkey | default(True)
+        - run_config.ssh_key_path is not defined
 
     - name: Load Instance Config (if exists)
       kubevirt_driver_instance_config:
@@ -209,27 +231,18 @@
         index_var: instance_index
         loop_var: instance
 
-    - name: Debug return values
-      debug:
-        msg:
-          - "server: {{ server }}"
-          - "pvcs: {{ pvcs }}"
-          - "instance_config: {{ instance_data.instance_config }}"
-
     - name: Wait For IP Lease
-      k8s_info:
-        kind: VirtualMachineInstance
+      kubevirt_driver_wait_for_lease:
+        kubeconfig: "{{ kubeconfig_path }}"
         namespace: "{{ instance.namespace }}"
         name: "{{ instance.pod_name }}"
+        wait_for_lease: True
       loop: "{{ instance_data.instance_data }}"
       loop_control:
         index_var: instance_index
         loop_var: instance
         #label: "{{ item.name }}"
       register: vmi
-      retries: "{{ waitForLeaseRetries | default(10) }}"
-      delay: "{{ waitForLeaseDelay | default(6) }}"
-      until: "vmi.resources[0].status.interfaces[0].ipAddress | default(None)"
       ignore_errors: yes
       when: waitForLease | default(True)
 
@@ -255,3 +268,9 @@
         path: "{{ molecule_instance_config }}"
       register: instance_config
       when: final_config is changed # noqa no-handler
+
+    - name: Save run_config
+      ansible.builtin.copy:
+        content: "{{ run_config | to_yaml }}"
+        dest: "{{ run_config_path }}"
+        mode: "0600"

@@ -5,6 +5,9 @@ import re
 from dataclasses import dataclass, asdict
 from typing import Optional
 
+from molecule_plugins.kubevirt.modules.model.defaults import DefaultConfig
+
+
 @dataclass
 class InstanceConfig:
     """Represents a single instance configuration."""
@@ -162,11 +165,14 @@ class InstanceConfig:
         return instance
 
     @classmethod
-    def from_name_and_run(cls, name, run_id, namespace=None):
+    def from_name_and_run(cls, name: str, run_id: str, namespace: str=None,
+                          defaults: DefaultConfig=None):
         return cls(
             instance=name,
             run_id=run_id,
             namespace=namespace if namespace is not None else None,
+            port=int(defaults.ssh_port) if defaults is not None else None,
+            user=defaults.ssh_user if defaults is not None else None,
         )
 
     @property

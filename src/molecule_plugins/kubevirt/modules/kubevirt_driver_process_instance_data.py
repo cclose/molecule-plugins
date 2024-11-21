@@ -11,6 +11,7 @@ from molecule_plugins.kubevirt.modules.model.instance_data \
 from molecule_plugins.kubevirt.modules.model.platform_config \
     import PlatformConfig, PlatformConfigList
 from molecule_plugins.kubevirt.modules.model.defaults import DefaultConfig
+from molecule_plugins.kubevirt.modules.model.run_config import RunConfig
 
 DOCUMENTATION = """
 ---
@@ -105,6 +106,7 @@ def prepare_instance_data(instance_config, platform_config, run_config, default_
         default_config = {}
 
     defaults = DefaultConfig.from_dict(default_config)
+    rc = RunConfig.from_dict(run_config)
     run_id = run_config.get("run_id", None)
     # Todo deal with None Run_Id
     platform_data = PlatformConfigList.from_dict(platform_config, defaults)
@@ -115,15 +117,18 @@ def prepare_instance_data(instance_config, platform_config, run_config, default_
         name = instance.name
         # look for a matching instance_config
         ic = ic_list.get_instance(name)
-        # TODO fail parsing
         if ic is None:
-            ic = InstanceConfig.from_name_and_run(name, run_id,
-                                                  namespace=instance.namespace)
+            ic = InstanceConfig.from_name_and_run(name, rc.run_id,
+                                                  namespace=instance.namespace,
+                                                  defaults=defaults)
             ic_list.instance_configs.append(ic)
 
-        instance_data = InstanceData.from_config(ic, instance)
+        instance_data = InstanceData.from_config(ic, instance, rc=rc)
 
         instance_data_list.append(instance_data.to_dict())
+        # If we have an identity file set, add it to the instance config
+        if rc.ssh_key_path:
+            ic.identity_file = rc.ssh_key_path
 
     return instance_data_list, ic_list.to_list()
 

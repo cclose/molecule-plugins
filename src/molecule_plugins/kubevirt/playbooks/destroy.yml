@@ -8,7 +8,7 @@
     ansible_python_interpreter: /Users/CoryClose/PythonVEnvs/molecule-plugins/.venv/bin/python3
     # TODO Make this exist
     ssh_identity_file: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssh_key"
-    kubeconfig_path: "./harvester.yaml"
+    kubeconfig_path: "{{ molecule_yml.driver.kubeconfig | realpath }}"
     instances: "{{ molecule_yml.platforms }}"
     default_run_id: "{{ lookup('password', '/dev/null', chars=['ascii_lowercase', 'digits'], length=5, seed=now(fmt='%s')) }}"
     default_run_config:
@@ -84,3 +84,8 @@
         dest: "{{ molecule_instance_config }}"
         mode: "0600"
       when: server.changed | default(false) | bool  # noqa no-handler
+
+    - name: Clear Run Config
+      ansible.builtin.file:
+        path: "{{ run_config_path }}"
+        state: absent
