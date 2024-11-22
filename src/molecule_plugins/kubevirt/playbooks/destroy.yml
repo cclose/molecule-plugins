@@ -6,20 +6,21 @@
   no_log: "{{ molecule_no_log | default(false) }}"
   vars:
     ansible_python_interpreter: /Users/CoryClose/PythonVEnvs/molecule-plugins/.venv/bin/python3
-    # TODO Make this exist
-    ssh_identity_file: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssh_key"
+    run_config_path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/run-config.yml"
     kubeconfig_path: "{{ molecule_yml.driver.kubeconfig | realpath }}"
     instances: "{{ molecule_yml.platforms }}"
-    default_run_id: "{{ lookup('password', '/dev/null', chars=['ascii_lowercase', 'digits'], length=5, seed=now(fmt='%s')) }}"
-    default_run_config:
-      run_id: "{{ molecule_yaml.driver.run_id | default(default_run_id) }}"
-      run_prefix: "{{ molecule_yaml.driver.run_prefix | default('molecule-') }}"
-
-    run_config_path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/run-config.yml"
-    run_config_from_file: "{{ (lookup('file', run_config_path, errors='ignore') or '{}') | from_yaml }}"
-    run_config: '{{ default_run_config | combine(run_config_from_file) }}'
 
   tasks:
+    - name: Load Run Config (if exists)
+      kubevirt_driver_run_config:
+        action: load
+        path: "{{ run_config_path }}"
+      register: run_config
+
+    - name: Set Run Config
+      ansible.builtin.set_fact:
+        run_config: "{{ run_config.run_config }}"
+
     - name: Load Instance Config
       kubevirt_driver_instance_config:
         action: load

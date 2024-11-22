@@ -5,73 +5,28 @@
   gather_facts: false
   #no_log: "{{ molecule_no_log }}"
   vars:
-    # Run config - Helpfully borrowed from the ec2 driver!
+    # Molecule Vars
+    molecule_scenario_name: "{{ lookup('env', 'MOLECULE_SCENARIO_NAME') }}"
+    molecule_project_name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+    molecule_ephemeral_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}"
     # Run config handling
-    # generate a unique identifier for this run. Be sure to set seed or else the value changes EVERY TIME it's accessed
-    default_run_id: "{{ lookup('password', '/dev/null', chars=['ascii_lowercase', 'digits'], length=5, seed=now(fmt='%s')) }}"
-    default_run_config:
-      run_id: "{{ molecule_yaml.driver.run_id | default(default_run_id) }}"
-      run_prefix: "{{ molecule_yaml.driver.run_prefix | default('molecule-') }}"
-
     run_config_path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/run-config.yml"
-    run_config_from_file: "{{ (lookup('file', run_config_path, errors='ignore') or '{}') | from_yaml }}"
-    run_config: '{{ default_run_config | combine(run_config_from_file) }}'
 
     ansible_python_interpreter: /Users/CoryClose/PythonVEnvs/molecule-plugins/.venv/bin/python3
-    # Defaults
-    # Molecule Vars
-    molecule_scenario_name: "{{ lookup('env', 'MOLECULE_SCENARIO_DIRECTORY') }}"
-    molecule_ephemeral_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}"
-    #kubeconfig_path: "{{ [lookup('env', 'MOLECULE_PROJECT_DIRECTORY'), molecule_yml.driver.kubeconfig] | path_join }}"
     kubeconfig_path: "{{ molecule_yml.driver.kubeconfig | realpath }}"
-    molecule_app_label: "{{ run_config.run_prefix }}-{{ run_config.run_id }}"
     instances: "{{ molecule_yml.platforms }}"
 
-    #    cloudInit:
-    #      userData: |
-    #        #cloud-config
-    #        password: molecule
-    #        chpasswd: { expire: False }
-    #        ssh_pwauth: True
-    #        package_update: true
-    #        package_upgrade: true
-    #
-    #        chpasswd:
-    #          list: |
-    #            ubuntu:ubuntu
-    #          expire: false
-    #
-    #        packages:
-    #          - curl
-    #          - git
-    #          - openssl
-    #          - python3
-    #          - python3-apt
-    #          - qemu-guest-agent
-    #          - wget
-    #        runcmd:
-    #          - - systemctl
-    #            - enable
-    #            - --now
-    #            - qemu-guest-agent.service
-    #        ssh_authorized_keys:
-    #          - {{ sshPublicKey }}
-
-    #      networkData: |
-    #        network:
-    #          version: 2
-    #          ethernets:
-    #            enp1s0:
-    #              dhcp4: true
-    #              gateway4: 10.1.250.1
-    #              nameservers:
-    #                addresses:
-    #                  - 10.1.250.222
-    #                  - 10.1.20.20
-    #                  - 8.8.8.8
-    #                  - 8.8.4.4
-
   tasks:
+    - name: Load Run Config (if exists)
+      kubevirt_driver_run_config:
+        action: load
+        path: "{{ run_config_path }}"
+      register: run_config
+
+    - name: Set Run Config
+      ansible.builtin.set_fact:
+        run_config: "{{ run_config.run_config }}"
+
     - block:
       - name: Generate SSH Keypair
         community.crypto.openssh_keypair:
@@ -94,7 +49,11 @@
 
       when:
         - kubevirt_gen_sshkey | default(True)
-        - run_config.ssh_key_path is not defined
+        - run_config.ssh_key_path is not defined or not run_config.ssh_key_path
+
+    - name: debug run config
+      debug:
+        msg: "RC: {{ run_config }}"
 
     - name: Load Instance Config (if exists)
       kubevirt_driver_instance_config:
@@ -151,8 +110,8 @@
           metadata:
             name: "{{ disk.name }}"
             labels:
-              app: "{{ molecule_app_label }}"
-              instance: "{{ molecule_app_label }}-{{ instance.name }}"
+              app: "{{ run_config.molecule_app_label }}"
+              instance: "{{ run_config.molecule_app_label }}-{{ instance.name }}"
               instance_name: "{{ instance.name }}"
               instance_drive: "{{ disk.diskName }}"
               molecule_id: "{{ instance.molecule_id }}"
@@ -183,8 +142,8 @@
           metadata:
             name: "{{ instance.pod_name }}"
             labels:
-              app: "{{ molecule_app_label }}"
-              instance: "{{ molecule_app_label }}-{{ instance.name }}"
+              app: "{{ run_config.molecule_app_label }}"
+              instance: "{{ run_config.molecule_app_label }}-{{ instance.name }}"
               instance-name: "{{ instance.name }}"
               molecule_id: "{{ instance.molecule_id }}"
           spec:
@@ -192,8 +151,8 @@
             template:
               metadata:
                 labels:
-                  app: "{{ molecule_app_label }}"
-                  instance: "{{ molecule_app_label }}-{{ instance.name }}"
+                  app: "{{ run_config.molecule_app_label }}"
+                  instance: "{{ run_config.molecule_app_label }}-{{ instance.name }}"
                   instance_name: "{{ instance.name }}"
                   molecule_id: "{{ instance.molecule_id }}"
               spec:
@@ -269,8 +228,9 @@
       register: instance_config
       when: final_config is changed # noqa no-handler
 
-    - name: Save run_config
-      ansible.builtin.copy:
-        content: "{{ run_config | to_yaml }}"
-        dest: "{{ run_config_path }}"
-        mode: "0600"
+    - name: Save Run Config
+      kubevirt_driver_run_config:
+        action: save
+        path: "{{ run_config_path }}"
+        run_config: "{{ run_config }}"
+      register: run_config
