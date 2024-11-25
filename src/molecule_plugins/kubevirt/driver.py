@@ -62,6 +62,7 @@ class KubeVirt(Driver):
 
         driver:
           name: custom_kubevirt
+          kubeconfig: kubeconfig.yml # Path is relative to molecule.yml
         platforms:
           - name: example-vm
             namespace: harvester-public
@@ -294,6 +295,7 @@ class KubeVirt(Driver):
         """Return collections dict containing names and versions required."""
         return {
             "ansible.posix": "1.3.0",
+            "community.crypto": "2.19.0",
             "kubernetes.core": "3",
         }
 
