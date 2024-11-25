@@ -130,13 +130,6 @@ class KubeVirt(Driver):
     def __init__(self, config=None) -> None:
         """Construct KubeVirt."""
         super().__init__(config)
-        if config is not None:
-            print(f"Run UUID: {config._run_uuid}")
-            print(f"Scenarior: {config.scenario.name}")
-            print(f"SDir: {config.scenario.directory}")
-            print(f"EDir: {config.scenario.ephemeral_directory}")
-            print(f"PDir: {config.project_directory}")
-            print(f"PDirBN: {basename(config.project_directory)}")
         self._name = "custom-kubevirt"
         self._sanity_passed = False
 
@@ -150,7 +143,6 @@ class KubeVirt(Driver):
 
     @property
     def login_cmd_template(self):
-        # TODO
         connection_options = " ".join(self.ssh_connection_options)
 
         return (
@@ -163,10 +155,10 @@ class KubeVirt(Driver):
 
     @property
     def default_safe_files(self):
-        # TODO
         return [
             self.instance_config,
-            os.path.join(self._config.scenario.ephemeral_directory, ".vagrant")
+            os.path.join(self._config.scenario.ephemeral_directory, "run-config.yml")
+            # TODO generated ssh-key
         ]
 
     @property
