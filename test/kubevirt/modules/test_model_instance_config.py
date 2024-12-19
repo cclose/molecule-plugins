@@ -13,21 +13,27 @@ def test_yaml():
       user: ubuntu
       port: 22
       identity_file: "/Users/jdoe/.cache/molecule/rolename/default/id_ed25519"
-      id: 3cee2a38-ac0c-5f0e-981d-7b8e4b6d8caa
+      id: b10e1e72049e419dbdffddeee1537d1a
+      uid: 3cee2a38-ac0c-5f0e-981d-7b8e4b6d8caa
+      namespace: testing
       run_id: mics9
     - instance: node2
       address: 10.1.2.4
       user: ubuntu
       port: 22
       identity_file: "/Users/jdoe/.cache/molecule/rolename/default/id_ed25519"
-      id: 4dee2a38-ac0c-5f0e-981d-7b8e4b6d8dba
+      id: b20e1e72049e419dbdffddeee1537d2a
+      uid: 4dee2a38-ac0c-5f0e-981d-7b8e4b6d8dba
+      namespace: testing
       run_id: mics10
     - instance: node3
       address: 10.1.2.5
       user: ubuntu
       port: 22
       password: "secretSecureP4$$"
-      id: 4dee2a38-ac0c-5f0e-981d-7b8e4b6d8dca
+      id: b30e1e72049e419dbdffddeee1537d3a
+      uid: 4dee2a38-ac0c-5f0e-981d-7b8e4b6d8dca
+      namespace: testing
       run_id: mics10
     """
 
@@ -41,7 +47,9 @@ def test_instance_config():
         user="ubuntu",
         port=22,
         identity_file="/Users/jdoe/.cache/molecule/rolename/default/id_ed25519",
-        id="3cee2a38-ac0c-5f0e-981d-7b8e4b6d8caa",
+        id="b10e1e72049e419dbdffddeee1537d1a",
+        uid="3cee2a38-ac0c-5f0e-981d-7b8e4b6d8caa",
+        namespace="testing",
         run_id="mics9"
     )
 
@@ -51,7 +59,9 @@ def test_instance_config():
         user="ubuntu",
         port=22,
         identity_file="/Users/jdoe/.cache/molecule/rolename/default/id_ed25519",
-        id="4dee2a38-ac0c-5f0e-981d-7b8e4b6d8dba",
+        id="b20e1e72049e419dbdffddeee1537d2a",
+        uid="4dee2a38-ac0c-5f0e-981d-7b8e4b6d8dba",
+        namespace="testing",
         run_id="mics10"
     )
 
@@ -61,7 +71,9 @@ def test_instance_config():
         user="ubuntu",
         port=22,
         password="secretSecureP4$$",
-        id="4dee2a38-ac0c-5f0e-981d-7b8e4b6d8dca",
+        id="b30e1e72049e419dbdffddeee1537d3a",
+        uid="4dee2a38-ac0c-5f0e-981d-7b8e4b6d8dca",
+        namespace="testing",
         run_id="mics10"
     )
 
@@ -81,7 +93,8 @@ def test_instance_config2():
             user="root",
             port=9222,
             identity_file="/Users/bob/.cache/molecule/rolename/default/id_ed25519",
-            id="3cee2a38-ac0c-5f0e-231d-7b8edeadbeef",
+            uid="3cee2a38-ac0c-5f0e-231d-7b8edeadbeef",
+            namespace="testing",
             run_id="bob12"
         )
     ])
@@ -268,8 +281,8 @@ def test_instance_config_get_subresource_name():
 )
 def test_instance_config_from_dict_sanity_checks(key, value, expected_failure):
     test_dict = {'instance': 'test-instance', 'address': 'test-instance.devlab.local', 'port': 22, 'user': 'ubuntu',
-                 'identity_file': '/path/to/file', 'id': '4dee2a38-ac0c-5f0e-981d-7b8e4b6d8dca', 'run_id': 'run123',
-                 key: value}
+                 'identity_file': '/path/to/file', 'uid': '4dee2a38-ac0c-5f0e-981d-7b8e4b6d8dca', 'run_id': 'run123',
+                 'id': 'b30e1e72049e419dbdffddeee1537d3a', 'namespace': 'testing', key: value}
 
     with pytest.raises(ValueError) as e:
         InstanceConfig.from_dict(test_dict)

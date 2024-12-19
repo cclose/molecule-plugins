@@ -6,6 +6,7 @@ from molecule_plugins.kubevirt.modules.model.instance_config import InstanceConf
 from molecule_plugins.kubevirt.modules.model.instance_data import InstanceData, InstanceDisk, InstanceDiskBus, \
     InstanceInterface, InstanceNetwork, InstancePVC, InstanceVolume, InstanceVolumePVC, InstanceCloudInit
 from molecule_plugins.kubevirt.modules.model.platform_config import PlatformConfig
+from molecule_plugins.kubevirt.modules.model.run_config import RunConfig
 
 
 def test_instance_data_to_dict():
@@ -50,6 +51,7 @@ def test_instance_data_to_dict():
         pvcs=[
             InstancePVC(
                 name=ic.get_subresource_name("root-fs-pvc"),
+                diskName="root-fs",
                 accessMode=defaults.disk_access_mode,
                 size=defaults.disk_size,
                 storageClass="harvester-dv-ubuntu22",
@@ -57,6 +59,7 @@ def test_instance_data_to_dict():
             ),
             InstancePVC(
                 name=ic.get_subresource_name("data-pvc"),
+                diskName="root-fs",
                 accessMode=defaults.disk_access_mode,
                 size=defaults.disk_size,
                 storageClass="harvester",
@@ -183,7 +186,8 @@ def test_instance_data_memory_requests(input, output, ratio, fail):
     defaults = DefaultConfig.from_dict({})
     ic = InstanceConfig.from_name_and_run("test", "trun01")
     pc = PlatformConfig.from_dict(pcd, defaults)
-    id = InstanceData.from_config(ic, pc)
+    rc = RunConfig.new("unittest", "utest", "test_instancedata")
+    id = InstanceData.from_config(ic, pc, rc)
     assert isinstance(id, InstanceData)
 
     try:

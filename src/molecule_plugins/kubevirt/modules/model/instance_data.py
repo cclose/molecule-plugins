@@ -9,8 +9,6 @@ from molecule_plugins.kubevirt.modules.model.platform_config import PlatformConf
 from base64 import b64encode
 from humanfriendly import parse_size, format_size
 
-from poetry.console.commands import self
-
 from molecule_plugins.kubevirt.modules.model.run_config import RunConfig
 
 
