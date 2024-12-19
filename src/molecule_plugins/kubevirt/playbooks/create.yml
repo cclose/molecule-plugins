@@ -12,7 +12,6 @@
     # Run config handling
     run_config_path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/run-config.yml"
 
-    ansible_python_interpreter: /Users/CoryClose/PythonVEnvs/molecule-plugins/.venv/bin/python3
     kubeconfig_path: "{{ molecule_yml.driver.kubeconfig | realpath }}"
     instances: "{{ molecule_yml.platforms }}"
 
