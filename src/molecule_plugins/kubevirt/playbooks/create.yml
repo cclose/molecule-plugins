@@ -1,0 +1,235 @@
+---
+- name: Create
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  #no_log: "{{ molecule_no_log }}"
+  vars:
+    # Molecule Vars
+    molecule_scenario_name: "{{ lookup('env', 'MOLECULE_SCENARIO_NAME') }}"
+    molecule_project_name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
+    molecule_ephemeral_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}"
+    # Run config handling
+    run_config_path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/run-config.yml"
+
+    kubeconfig_path: "{{ molecule_yml.driver.kubeconfig | realpath }}"
+    instances: "{{ molecule_yml.platforms }}"
+
+  tasks:
+    - name: Load Run Config (if exists)
+      kubevirt_driver_run_config:
+        action: load
+        path: "{{ run_config_path }}"
+      register: run_config
+
+    - name: Set Run Config
+      ansible.builtin.set_fact:
+        run_config: "{{ run_config.run_config }}"
+
+    - block:
+      - name: Generate SSH Keypair
+        community.crypto.openssh_keypair:
+          path: "{{ molecule_ephemeral_dir }}/id_ed25512_{{ run_config.run_id }}"
+          type: "{{ kubevirt_sshkey_type | default('ed25519') }}"
+          state: present
+        register: kubevirt_ssh_key
+
+      - name: Store SSH Keys data in run_config
+        ansible.builtin.set_fact:
+          run_config: >-
+            {{
+              run_config |
+              combine({
+                'ssh_key_path': kubevirt_ssh_key.filename,
+                'ssh_public_key': kubevirt_ssh_key.public_key,
+                'ssh_key_token': 'SSH_PUBLIC_KEY',
+              })
+            }}
+
+      when:
+        - kubevirt_gen_sshkey | default(True)
+        - run_config.ssh_key_path is not defined or not run_config.ssh_key_path
+
+    - name: debug run config
+      debug:
+        msg: "RC: {{ run_config }}"
+
+    - name: Load Instance Config (if exists)
+      kubevirt_driver_instance_config:
+        action: load
+        path: "{{ molecule_instance_config }}"
+      register: instance_config
+
+    - name: Process Instance and Platform Data
+      kubevirt_driver_process_instance_data:
+        action: prepare
+        instance_config: "{{ instance_config.instance_config }}"
+        platform_config: "{{ instances }}"
+        run_config: "{{ run_config }}"
+      register: instance_data
+
+    # This task uses the `subelements` filter to iterate each instance and its disks.
+    # The filter returns a tuple (instance, disk), allowing iteration over both at once.
+    # Using `loop_control.loop_var` and `vars`, we split this tuple for clarity:
+    # `instance` is the main object (node), and `disk` is each of its subelements.
+    # Example input with `subelements` filter applied:
+    #   instances:
+    #     - name: node1
+    #       disks:
+    #         - name: data1
+    #         - name: data2
+    #     - name: node2
+    #       disks:
+    #         - name: data1
+    #     - name: node3
+    # Yields:
+    # [
+    #   [{ 'name': 'node1' }, { 'name': 'data1' }],
+    #   [{ 'name': 'node1' }, { 'name': 'data2' }],
+    #   [{ 'name': 'node2' }, { 'name': 'data1' }]
+    # ]
+    #
+    # We use loop_var and var to split this for clarity:
+    #   instance: { 'name': 'node1'}, disk: { 'name': 'data1' }
+    #
+    # So that we can template:
+    #   name: {{ instance.name }}-{{ disk.name }}
+    #
+    # Otherwise it would look like:
+    #   name: {{ item.0.name }}-{{ item.1.name }}
+
+    - name: Create Disks
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: v1
+        kind: PersistentVolumeClaim
+        namespace: "{{ instance.namespace }}"
+        state: present
+        definition:
+          metadata:
+            name: "{{ disk.name }}"
+            labels:
+              app: "{{ run_config.molecule_app_label }}"
+              instance: "{{ run_config.molecule_app_label }}-{{ instance.name }}"
+              instance_name: "{{ instance.name }}"
+              instance_drive: "{{ disk.diskName }}"
+              molecule_id: "{{ instance.molecule_id }}"
+          spec:
+            accessModes:
+              - "{{ disk.accessMode }}"
+            resources:
+              requests:
+                storage: "{{ disk.size }}"
+            storageClassName: "{{ disk.storageClass }}"
+            volumeMode: "{{ disk.volumeMode }}"
+      loop: "{{ instance_data.instance_data | subelements('pvcs', skip_missing=True) }}"
+      loop_control:
+        loop_var: instance_and_disk
+      vars:
+        instance: "{{ instance_and_disk[0] }}"  # The main item
+        disk: "{{ instance_and_disk[1] }}"      # The subelement
+      register: pvcs
+
+    - name: Create Instance
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: v1
+        kind: VirtualMachine
+        namespace: "{{ instance.namespace }}"
+        state: present
+        definition:
+          metadata:
+            name: "{{ instance.pod_name }}"
+            labels:
+              app: "{{ run_config.molecule_app_label }}"
+              instance: "{{ run_config.molecule_app_label }}-{{ instance.name }}"
+              instance-name: "{{ instance.name }}"
+              molecule_id: "{{ instance.molecule_id }}"
+          spec:
+            running: true
+            template:
+              metadata:
+                labels:
+                  app: "{{ run_config.molecule_app_label }}"
+                  instance: "{{ run_config.molecule_app_label }}-{{ instance.name }}"
+                  instance_name: "{{ instance.name }}"
+                  molecule_id: "{{ instance.molecule_id }}"
+              spec:
+                architecture: "{{ instance.arch }}"
+                domain:
+                  # The cores must be a uint, and ansible templating wanted to make everything a string
+                  cpu: >-
+                    {
+                      "cores": {{ instance.cores | int }} 
+                    }
+                  devices:
+                    disks: "{{ instance.disks }}"
+                    interfaces: "{{ instance.interfaces }}"
+                  firmware:
+                    bootloader:
+                      efi:
+                        secureBoot: "{{ instance.secureBoot }}"
+                  machine:
+                    type: "{{ instance.machineType }}"
+                  memory:
+                    guest: "{{ instance.memory }}"
+                  resources:
+                    limits:
+                      cpu: "{{ instance.cores | int }}"
+                      memory: "{{ instance.memory }}"
+                    requests:
+                      cpu: "{{ instance.cpuRequests }}"
+                      memory: "{{ instance.memoryRequests }}"
+                networks: "{{ instance.networks }}"
+                volumes: "{{ instance.volumes }}"
+
+      register: server
+      loop: "{{ instance_data.instance_data }}"
+      loop_control:
+        index_var: instance_index
+        loop_var: instance
+
+    - name: Wait For IP Lease
+      kubevirt_driver_wait_for_lease:
+        kubeconfig: "{{ kubeconfig_path }}"
+        namespace: "{{ instance.namespace }}"
+        name: "{{ instance.pod_name }}"
+        wait_for_lease: True
+      loop: "{{ instance_data.instance_data }}"
+      loop_control:
+        index_var: instance_index
+        loop_var: instance
+        #label: "{{ item.name }}"
+      register: vmi
+      ignore_errors: yes
+      when: waitForLease | default(True)
+
+    - name: Parse Instance Results
+      kubevirt_driver_process_instance_data:
+        action: parse_instance
+        instance_config: "{{ instance_data.instance_config }}"
+        instance_data: "{{ server.results }}"
+        drive_data: "{{ pvcs.results }}"
+      register: final_config
+
+    # Mandatory configuration for Molecule to function.
+    - name: Debug return values
+      debug:
+        msg:
+          - "final_config: {{ final_config }}"
+
+
+    - name: Create molecule instances configuration
+      kubevirt_driver_instance_config:
+        action: save
+        instance_data: "{{ final_config.instance_config }}"
+        path: "{{ molecule_instance_config }}"
+      register: instance_config
+      when: final_config is changed # noqa no-handler
+
+    - name: Save Run Config
+      kubevirt_driver_run_config:
+        action: save
+        path: "{{ run_config_path }}"
+        run_config: "{{ run_config }}"
+      register: run_config

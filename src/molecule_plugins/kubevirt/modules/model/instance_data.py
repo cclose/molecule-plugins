@@ -1,0 +1,297 @@
+from typing import Optional
+from dataclasses import dataclass
+
+import humanfriendly
+
+from molecule_plugins.kubevirt.modules.model.common import DictParserMixin
+from molecule_plugins.kubevirt.modules.model.instance_config import InstanceConfig
+from molecule_plugins.kubevirt.modules.model.platform_config import PlatformConfig
+from base64 import b64encode
+from humanfriendly import parse_size, format_size
+
+from molecule_plugins.kubevirt.modules.model.run_config import RunConfig
+
+
+@dataclass
+class InstanceDiskBus(DictParserMixin):
+    bus: str
+
+@dataclass
+class InstanceDisk(DictParserMixin):
+    name: str
+    disk: InstanceDiskBus
+
+@dataclass
+class InstanceInterface(DictParserMixin):
+    name: str
+    model: str
+    bridge: dict
+
+@dataclass
+class InstanceMultus(DictParserMixin):
+    networkName: str
+
+@dataclass
+class InstanceNetwork(DictParserMixin):
+    name: str
+    multus: Optional[InstanceMultus] = None
+
+@dataclass
+class InstancePVC(DictParserMixin):
+    name: str
+    diskName: str
+    accessMode: str
+    size: str
+    storageClass: str
+    volumeMode: str
+
+@dataclass
+class InstanceVolumePVC(DictParserMixin):
+    claimName: str
+
+@dataclass
+class InstanceCloudInit():
+    userData: Optional[str] = None
+    networkData: Optional[str] = None
+    userDataBase64: Optional[str] = None
+    networkDataBase64: Optional[str] = None
+
+    def to_dict(self):
+        data = {}
+        if self.userData is not None:
+            data['userData'] = self.userData
+        if self.networkData is not None:
+            data['networkData'] = self.networkData
+        if self.userDataBase64 is not None:
+            data['userDataBase64'] = self.userDataBase64
+        if self.networkDataBase64 is not None:
+            data['networkDataBase64'] = self.networkDataBase64
+
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        # Create an instance of InstanceCloudInit from a dictionary
+        return cls(
+            userData=data.get("userData"),
+            networkData=data.get("networkData"),
+            userDataBase64=data.get("userDataBase64"),
+            networkDataBase64=data.get("networkDataBase64")
+        )
+
+
+@dataclass
+class InstanceVolume:
+    name: str
+    persistentVolumeClaim: Optional[InstanceVolumePVC] = None
+    cloudInitNoCloud: Optional[InstanceCloudInit] = None
+
+    def to_dict(self):
+        data = {
+            "name": self.name,
+        }
+
+        if self.persistentVolumeClaim is not None:
+            data["persistentVolumeClaim"] = self.persistentVolumeClaim.to_dict()
+        if self.cloudInitNoCloud is not None:
+            data["cloudInitNoCloud"] = self.cloudInitNoCloud.to_dict()
+
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        # Special handling for nested classes
+        pvc_data = data.get("persistentVolumeClaim")
+        cloud_init_data = data.get("cloudInitNoCloud")
+        return cls(
+            name=data["name"],
+            persistentVolumeClaim=InstanceVolumePVC.from_dict(pvc_data) if pvc_data else None,
+            cloudInitNoCloud=InstanceCloudInit.from_dict(cloud_init_data) if cloud_init_data else None
+        )
+
+@dataclass
+class InstanceData(DictParserMixin):
+    """
+    Represents the Data for an instance need to deploy K8S resources
+    """
+    name: str
+    dns_safe_name: str
+    run_name: str
+    pod_name: str
+    molecule_id: str
+    # TODO
+    arch: str
+    cores: int
+    cpuRatio: float
+    machineType: str
+    memory: str
+    memoryRatio: float
+    namespace: str
+    secureBoot: bool
+    # END TODO
+    disks: list[InstanceDisk]
+    interfaces: list[InstanceInterface]
+    networks: list[InstanceNetwork]
+    pvcs: list[InstancePVC]
+    volumes: list[InstanceVolume]
+
+    @property
+    def cpu_requests(self) -> float:
+        return self.cores * self.cpuRatio
+
+    @property
+    def memory_requests(self) -> str:
+        mem = self.memory.strip(' ')
+        # If using binary size without the B, add it
+        if mem.endswith('i'):
+            mem = f"{mem}B"
+        memR = parse_size(mem) * self.memoryRatio
+        memSize = format_size(memR, binary=True).replace(' ', '')
+
+        if memSize.endswith('bytes'):
+            raise humanfriendly.InvalidSize("Must use a unit greater than Bytes (B|Bi)!")
+
+        if memSize.endswith('B'):
+            memSize = memSize[:-1] # Subtract trailing B
+        # extract size from units
+
+        return memSize
+
+    def to_dict(self):
+        return {
+            "name": self.name,
+            "dns_safe_name": self.dns_safe_name,
+            "run_name": self.run_name,
+            "pod_name": self.pod_name,
+            "molecule_id": self.molecule_id,
+            "arch": self.arch,
+            "cores": self.cores,
+            "cpuRatio": self.cpuRatio,
+            "cpuRequests": self.cpu_requests,
+            "machineType": self.machineType,
+            "memory": self.memory,
+            "memoryRatio": self.memoryRatio,
+            "memoryRequests": self.memory_requests,
+            "namespace": self.namespace,
+            "secureBoot": self.secureBoot,
+            "disks": [disk.to_dict() for disk in self.disks if disk is not None],
+            "interfaces": [iface.to_dict() for iface in self.interfaces if iface is not None],
+            "networks": [network.to_dict() for network in self.networks if network is not None],
+            "pvcs": [pvc.to_dict() for pvc in self.pvcs if pvc is not None],
+            "volumes": [volume.to_dict() for volume in self.volumes if volume is not None],
+        }
+
+    @classmethod
+    def from_config(cls, ic: InstanceConfig, pc: PlatformConfig, rc: RunConfig):
+        disks = [
+            InstanceDisk(
+                name=pc.rootFsName,
+                disk=InstanceDiskBus(
+                    bus=pc.rootFsType,
+                )
+            )
+        ]
+        interfaces = [
+            InstanceInterface(
+                name=pc.interfaceName,
+                model=pc.interfaceType,
+                bridge={},
+            )
+        ]
+        networks = [
+            InstanceNetwork(
+                name=pc.interfaceName,
+                multus=InstanceMultus(networkName=pc.interfaceMultus) if pc.interfaceMultus is not None else None,
+            )
+        ]
+        pvcs = [
+            InstancePVC(
+                name=ic.get_subresource_name(pc.rootFsName),
+                diskName=pc.rootFsName,
+                accessMode=pc.rootFsAccessMode,
+                size=pc.rootFsSize,
+                storageClass=pc.rootFsStorageClass,
+                volumeMode=pc.rootFsVolumeMode,
+            )
+        ]
+        volumes = [
+            InstanceVolume(
+                name=pc.rootFsName,
+                persistentVolumeClaim=InstanceVolumePVC(
+                    claimName=ic.get_subresource_name(pc.rootFsName),
+                )
+            )
+        ]
+
+        for disk in pc.disks:
+            disks.append(InstanceDisk(
+                name=disk.name,
+                disk=InstanceDiskBus(
+                    bus=disk.type
+                )
+            ))
+            pvcs.append(InstancePVC(
+                name=ic.get_subresource_name(disk.name),
+                diskName=disk.name,
+                accessMode=disk.accessMode,
+                size=disk.size,
+                storageClass=disk.storageClass,
+                volumeMode=disk.volumeMode,
+            ))
+            volumes.append(InstanceVolume(
+                name=disk.name,
+                persistentVolumeClaim=InstanceVolumePVC(
+                    claimName=ic.get_subresource_name(disk.name),
+                )
+            ))
+
+        if pc.cloudInit is not None:
+            user_data = None
+            if pc.cloudInit.userData:
+                if rc.ssh_key_token and rc.ssh_public_key:
+                    # Replace the SSH Key token with the actual contents
+                    user_data = pc.cloudInit.userData.replace(rc.ssh_key_token, rc.ssh_public_key)
+
+            volumes.append(InstanceVolume(
+                name="cloudinitdisk",
+                cloudInitNoCloud=InstanceCloudInit(
+                    userDataBase64=b64encode(user_data.encode("utf-8"))
+                    if user_data else None,
+                    networkDataBase64=b64encode(pc.cloudInit.networkData.encode("utf-8"))
+                    if pc.cloudInit.networkData else None,
+                ) if pc.cloudInit.type == "cloudInitNoCloud" else None,
+            ))
+
+        for iface in pc.interfaces:
+            interfaces.append(InstanceInterface(
+                name=iface.name,
+                model=iface.type,
+                bridge=iface.bridge if iface.bridge is not None else None,
+            ))
+            networks.append(InstanceNetwork(
+                name=iface.name,
+                multus=InstanceMultus(networkName=iface.multus) if iface.multus is not None else None,
+            ))
+
+        return cls(
+            name=ic.instance,
+            dns_safe_name=ic.dns_name,
+            run_name=ic.run_name,
+            pod_name=ic.pod_name,
+            molecule_id=ic.molecule_id,
+            arch=pc.arch,
+            cores=pc.cores,
+            cpuRatio=pc.cpuRatio,
+            machineType=pc.machineType,
+            memory=pc.memory,
+            memoryRatio=pc.memoryRatio,
+            namespace=pc.namespace,
+            secureBoot=pc.secureBoot,
+            disks=disks,
+            interfaces=interfaces,
+            networks=networks,
+            pvcs=pvcs,
+            volumes=volumes
+        )
+
+

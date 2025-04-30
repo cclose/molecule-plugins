@@ -1,0 +1,11 @@
+- name: Converge
+  hosts: all
+  become: true
+  tasks:
+    - name: Wait for cloud-init to finish
+      shell: "cloud-init status --wait"
+      changed_when: false
+
+    - name: Make sure apt lock is cleared
+      apt:
+        update_cache: true

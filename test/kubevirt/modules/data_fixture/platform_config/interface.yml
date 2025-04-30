@@ -1,0 +1,8 @@
+- name: testnode-1
+  rootFsStorageClass: harvester-dv-ubuntu22
+  interfaces:
+    - name: enp1s1
+- name: testnode-2
+  rootFsStorageClass: harvester-dv-ubuntu22
+  interfaces:
+    - name: enp1s1
